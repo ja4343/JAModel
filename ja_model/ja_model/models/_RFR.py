@@ -8,12 +8,13 @@ from statsmodels.graphics.gofplots import qqplot
 import pprint
 import matplotlib.pyplot as plt
 from pandas.plotting import autocorrelation_plot
-import sklearn.svm
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import RandomizedSearchCV
 
 from ja_model.utils import _test_metric, _rmse, powerset, simpleaxis, x_label_setter, y_label_setter
 from ja_model.models import Model
 
-class SVR(Model):
+class RFR(Model):
     def __init__(self, features, *args, **kwargs):
         """
         Args:
@@ -22,8 +23,8 @@ class SVR(Model):
         For more information, see LinReg.help()
         """
         super().__init__(*args, **kwargs)
-        print("Initialising a support vector regression classifier")
-        print("===================================================")
+        print("Initialising a random forest regression classifier")
+        print("==================================================")
         print(" ")
         print("Feature Set")
         print("-----------")
@@ -34,21 +35,72 @@ class SVR(Model):
         self.input_features = features
         self.best_features = features
         self._current_features = features
+        self._latest_params = {  'bootstrap': True,
+                                 'max_depth': 10,
+                                 'max_features': 'auto',
+                                 'min_samples_leaf': 4,
+                                 'min_samples_split': 5,
+                                 'n_estimators': 200   }
         self.__result = None
         self._model = None
         self.save_count = 0
 
+    def optimise_parameters(self, x_train=None, y_train=None):
+        """
+        Algorithm to optimise the random forest regression hyperparameters. Runs a prebuilt grid search across a suitable parameter range and sets the classifier hyperparameters to the optimum values. Note that this is carried out on the training set.
+
+        Args:
+            x_train : pd.DataFrame or similar - training data array
+            y_train : pd.DataFrame or similar - output array
+        """
+        # Number of trees in random forest
+        n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]
+        # Number of features to consider at every split
+        max_features = ['auto', 'sqrt']
+        # Maximum number of levels in tree
+        max_depth = [int(x) for x in np.linspace(10, 110, num = 11)]
+        max_depth.append(None)
+        # Minimum number of samples required to split a node
+        min_samples_split = [2, 5, 10]
+        # Minimum number of samples required at each leaf node
+        min_samples_leaf = [1, 2, 4]
+        # Method of selecting samples for training each tree
+        bootstrap = [True, False]
+        # Create the random grid
+        random_grid = {'n_estimators': n_estimators,
+                       'max_features': max_features,
+                       'max_depth': max_depth,
+                       'min_samples_split': min_samples_split,
+                       'min_samples_leaf': min_samples_leaf,
+                       'bootstrap': bootstrap}
+        # Use the random grid to search for best hyperparameters
+        # First create the base model to tune
+        rf = RandomForestRegressor()
+        # Random search of parameters, using 3 fold cross validation,
+        # search across 100 different combinations, and use all available cores
+        rf_random = RandomizedSearchCV(estimator = rf, param_distributions = random_grid, n_iter = 100, cv = 3, verbose=2, random_state=42, n_jobs = -1)
+        # Fit the random search model
+        if x_train == None or y_train == None:
+            rf_random.fit(self.get_data('X_train'), self.get_data('Y_train'))
+        else:
+            try:
+                if len(x_train) != len(y_train):
+                    raise ValueError('ERROR: Arrays x_train and y_train of different lengths.')
+                rf_random.fit(x_train, y_train)
+            except ValueError as ve:
+                print(ve.args[0])
+        self._latest_params = rf_random.best_params_
+        print("Finished optimising parameters, best set found:\n")
+        pprint.pprint(self._latest_params)
+
     def get_latest_params(self):
         """
-        Returns the latest run hyperparaneters
+        Returns the latest optimised hyperparaneters
 
         Returns:
             parameters : dictionary - dictionary of hyperparameters
         """
-        if self._model != None:
-            return self._model.get_params()
-        else:
-            print("ERROR: No model has been trained. Please train a model.")
+        return self._latest_params
 
 
     def feature_selection(self, test_function='rmse'):
@@ -77,8 +129,9 @@ class SVR(Model):
             Y_train_data = self.get_data('Y_train')
             Y_val_data = self.get_data('Y_val')
 
-            C = max(abs(Y_val_data.mean() + 3*Y_val_data.std()), abs(Y_val_data.mean() - 3*Y_val_data.std()))
-            epsilon = Y_val_data.std()/len(Y_val_data)
+            if self._latest_params == None:
+                self.optimise_parameters()
+                print("First optimising parameters over training set.")
 
             if (len(feature_set) < 100):
                 counter_check = 10
@@ -97,14 +150,7 @@ class SVR(Model):
                 X_train_data_temp = X_train_data[list(_features)]
                 X_val_data_temp = X_val_data[list(_features)]
                 feature_dict[counter] = list(_features)
-                gamma = 0.3**(1/len(list(_features)))
-                temp_model = sklearn.svm.SVR(
-                                    C       = C,
-                                    epsilon = epsilon,
-                                    kernel  = 'rbf',
-                                    gamma   = gamma,
-                                    verbose = False,
-                                    )
+                temp_model = RandomForestRegressor(**self._latest_params)
                 temp_model.fit(X_train_data_temp, Y_train_data)
                 val_forecast = temp_model.predict(X_val_data_temp)
                 val_rmse = _test_metric(Y_val_data, val_forecast, test_function)[0]
@@ -117,14 +163,7 @@ class SVR(Model):
             self.best_features = feature_dict[index[0]]
             X_train_data_temp = X_train_data[feature_dict[index[0]]]
             X_val_data_temp = X_val_data[feature_dict[index[0]]]
-            gamma = 0.3**(1/len(feature_dict[index[0]]))
-            temp_model = sklearn.svm.SVR(
-                                C       = C,
-                                epsilon = epsilon,
-                                kernel  = 'rbf',
-                                gamma   = gamma,
-                                verbose = False,
-                                )
+            temp_model = RandomForestRegressor(**self._latest_params)
             temp_model.fit(X_train_data_temp, Y_train_data)
             val_forecast = temp_model.predict(X_val_data_temp)
             val_rmse = _test_metric(Y_val_data, val_forecast, test_function)[0]
@@ -139,28 +178,29 @@ class SVR(Model):
         except TypeError as te:
             print(te.args[0])
 
-    def train(self, features=None, C=None, epsilon=None, kernel='rbf', gamma=None, degree=2):
+    def train(self, features=None, params=None):
         """
         Train the model on a chosen set of features. If none are chosen, the default is to re run the model with the current best_features attribute. Note that the training is carried out on the training data, X_train, only. To access the result, use:
 
         Args:
             features : list - train model with list of desired features
-            C : float - hyperparameter to control the penalty on breaking the epsilon bound
-            epsilon : float - hyperparameter to control the buffer zone around the true value
-            kernel : str - choice of kernel for the SVR, 'rbf' is the default, another suggested choice is a degree 2 polynomial ('poly')
-            gamma : float - hyperparamter for the 'rbf' kernel
-            degree : int - only for the 'poly' kernel, defines the degree of the polynomial
+            params : dictionary - { n_estimators : n_estimators,
+                                    max_features : max_features,
+                                    max_depth : max_depth,
+                                    min_samples_split : min_samples_split,
+                                    min_samples_leaf : min_samples_leaf,
+                                    bootstrap : bootstrap }
 
         Returns:
 
-        Note: The input data for the SVR should be normalised such that each feature lies in the same range e.g. [0,1] to ensure that no one feature dominates. Non-normalised data will result in potentially very poor results.
+        Note: The input data for the RFR should be normalised such that each feature lies in the same range e.g. [0,1] to ensure that no one feature dominates. Non-normalised data will result in potentially very poor results.
         """
         if not isinstance(self.get_data('X_train'), pd.DataFrame):
             raise TypeError("ERROR: The input training data was not in the form of a pd.DataFrame.")
-        print("Training - Support Vector Regression Classifier")
-        print("===============================================")
+        print("Training - Random Forest Regression Classifier")
+        print("==============================================")
         print(" ")
-        print("Running support vector classifier regression classifier on feauture set:")
+        print("Running random forest regression classifier on feauture set:")
         print(" ")
         if features == None:
             features = self.get_best_features()
@@ -176,28 +216,17 @@ class SVR(Model):
         X_train_data_temp = X_train_data[features]
         X_val_data_temp = X_val_data[features]
         X_test_data_temp = X_test_data[features]
-        if C == None:
-            C = max(np.abs(Y_train_data.mean() + 3*Y_train_data.std()), np.abs(Y_train_data.mean() - 3*Y_train_data.std()))
-        if epsilon == None:
-            epsilon = Y_train_data.std()/len(Y_train_data)
-        if gamma == None:
-            gamma = 0.3**(1/len(features))
+        if params == None:
+            params = self._latest_params
 
-        svr_model = sklearn.svm.SVR(
-                            C       = C,
-                            epsilon = epsilon,
-                            kernel  = kernel,
-                            gamma   = gamma,
-                            degree  = degree,
-                            verbose = False,
-                            )
-        svr_model.fit(X_train_data_temp, Y_train_data)
-        self._model = svr_model
-        Y_val_pred = svr_model.predict(X_val_data_temp)
-        Y_test_pred = svr_model.predict(X_test_data_temp)
-        print("Training r-squared:", svr_model.score(X_train_data_temp, Y_train_data))
-        print("Validation r-squared:", svr_model.score(X_val_data_temp, Y_val_data))
-        print("Testing r-squared:", svr_model.score(X_test_data_temp, Y_test_data))
+        rfr_model = RandomForestRegressor(**params)
+        rfr_model.fit(X_train_data_temp, Y_train_data)
+        self._model = rfr_model
+        Y_val_pred = rfr_model.predict(X_val_data_temp)
+        Y_test_pred = rfr_model.predict(X_test_data_temp)
+        print("Training r-squared:", rfr_model.score(X_train_data_temp, Y_train_data))
+        print("Validation r-squared:", rfr_model.score(X_val_data_temp, Y_val_data))
+        print("Testing r-squared:", rfr_model.score(X_test_data_temp, Y_test_data))
         final_rmse_val  = _test_metric(Y_val_data, Y_val_pred, 'rmse')
         self._val_rmse = final_rmse_val
         final_rmse_test = _test_metric(Y_test_data, Y_test_pred, 'rmse')
@@ -370,7 +399,7 @@ This is a support vector regression classifier for single variable output data.
 
 To initialise a classifier, simply provide a feature set which matches the data you will use to train and test your model:
 
-    clf = SVR(['time', 'temperature', ...])
+    clf = RFR(['time', 'temperature', ...])
 
 For input data (X, Y), we can generate a training, validation, and testing split via:
 
@@ -386,7 +415,11 @@ The data can then be accessed using:
     or
     clf.get_data('X_train') etc.
 
-The latest parameters from the regression can then be found using:
+There are a number of hyperparameters to optimise when it comes to the RFR, as such a pragmatic solution is to optimise the parameters with the full feature set and use this moving forward. To do this, perform a grid search using;
+
+    clf.optimise_parameters()
+
+The latest parameters from the optimisation can then be found using:
 
     clf.get_latest_params()
 
@@ -417,5 +450,3 @@ The data can be plotted either manually by the user or using the inbuilt:
 """
 
         print(helper_string)
-
-# END SVR Class

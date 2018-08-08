@@ -2,7 +2,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 mpl.rcdefaults()
-plt.style.use('H:\\James\\ja_model\\ja_model.mplstyle')
+plt.style.use('C:\\JAModel\\ja_model\\ja_model.mplstyle')
 
 def x_label_setter(label, axes):
     axes.set_xlabel(label, fontweight="bold")
