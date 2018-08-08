@@ -10,11 +10,12 @@ import matplotlib.pyplot as plt
 from pandas.plotting import autocorrelation_plot
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import RandomizedSearchCV
+import xgboost
 
 from ja_model.utils import _test_metric, _rmse, powerset, simpleaxis, x_label_setter, y_label_setter
 from ja_model.models import Model
 
-class RFR(Model):
+class XGB(Model):
     def __init__(self, features, *args, **kwargs):
         """
         Args:
@@ -23,7 +24,7 @@ class RFR(Model):
         For more information, see LinReg.help()
         """
         super().__init__(*args, **kwargs)
-        print("Initialising a random forest regression classifier")
+        print("Initialising a XGBoost regression classifier")
         print("==================================================")
         print(" ")
         print("Feature Set")
@@ -31,65 +32,58 @@ class RFR(Model):
         print(" ")
         pprint.pprint(features)
         print(" ")
-        print("IMPORTANT: For best results using the Random Forest Regression class, input data should be normalised to lie within the same range e.g. [0,1]. Non-normalised data could lead to poor results.")
+        print("IMPORTANT: For best results using the XGBoost Regression class, input data should be normalised to lie within the same range e.g. [0,1]. Non-normalised data could lead to poor results.")
         self.input_features = features
         self.best_features = features
         self._current_features = features
-        self._latest_params = {  'bootstrap': True,
-                                 'max_depth': 10,
-                                 'max_features': 'auto',
-                                 'min_samples_leaf': 4,
-                                 'min_samples_split': 5,
-                                 'n_estimators': 200   }
+        self._latest_params = {   'nthread': 4,
+                                  'objective': 'reg:linear',
+                                  'learning_rate': 0.02,
+                                  'max_depth': 10,
+                                  'min_child_weight': 4,
+                                  'silent': 1,
+                                  'subsample': 0.7,
+                                  'colsample_bytree': 0.7,
+                                  'n_estimators': 200}
         self.__result = None
         self._model = None
         self.save_count = 0
 
     def optimise_parameters(self, x_train=None, y_train=None):
         """
-        Algorithm to optimise the random forest regression hyperparameters. Runs a prebuilt grid search across a suitable parameter range and sets the classifier hyperparameters to the optimum values. Note that this is carried out on the training set.
+        Algorithm to optimise the XGBoost regression hyperparameters. Runs a prebuilt grid search across a suitable parameter range and sets the classifier hyperparameters to the optimum values. Note that this is carried out on the training set.
 
         Args:
             x_train : pd.DataFrame or similar - training data array
             y_train : pd.DataFrame or similar - output array
         """
-        # Number of trees in random forest
-        n_estimators = [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]
-        # Number of features to consider at every split
-        max_features = ['auto', 'sqrt']
-        # Maximum number of levels in tree
-        max_depth = [int(x) for x in np.linspace(10, 110, num = 11)]
-        max_depth.append(None)
-        # Minimum number of samples required to split a node
-        min_samples_split = [2, 5, 10]
-        # Minimum number of samples required at each leaf node
-        min_samples_leaf = [1, 2, 4]
-        # Method of selecting samples for training each tree
-        bootstrap = [True, False]
         # Create the random grid
-        random_grid = {'n_estimators': n_estimators,
-                       'max_features': max_features,
-                       'max_depth': max_depth,
-                       'min_samples_split': min_samples_split,
-                       'min_samples_leaf': min_samples_leaf,
-                       'bootstrap': bootstrap}
+        random_grid = {'nthread': [4],
+              'objective': ['reg:linear'],
+              'learning_rate': [x for x in np.linspace(0.02, 0.3, num = 10)],
+              'max_depth': [int(x) for x in np.linspace(10, 110, num = 11)],
+              'min_child_weight': [4],
+              'silent': [1],
+              'subsample': [0.7],
+              'colsample_bytree': [0.7],
+              'n_estimators': [int(x) for x in np.linspace(start = 200, stop = 2000, num = 10)]}
         # Use the random grid to search for best hyperparameters
         # First create the base model to tune
-        rf = RandomForestRegressor()
+        xgb = xgboost.XGBRegressor()
         # Random search of parameters, using 3 fold cross validation,
         # search across 100 different combinations, and use all available cores
-        rf_random = RandomizedSearchCV(estimator = rf, param_distributions = random_grid, n_iter = 100, cv = 3, verbose=2, random_state=42, n_jobs = -1)
+        xgb_random = RandomizedSearchCV(estimator = xgb, param_distributions = random_grid, n_iter = 100, cv = 3, verbose=2, random_state=1001, n_jobs = -1)
         # Fit the random search model
         if x_train == None or y_train == None:
-            rf_random.fit(self.get_data('X_train'), self.get_data('Y_train'))
+            xgb_random.fit(self.get_data('X_train'), self.get_data('Y_train'))
         else:
             try:
                 if len(x_train) != len(y_train):
                     raise ValueError('ERROR: Arrays x_train and y_train of different lengths.')
-                rf_random.fit(x_train, y_train)
+                xgb_random.fit(x_train, y_train)
             except ValueError as ve:
                 print(ve.args[0])
-        self._latest_params = rf_random.best_params_
+        self._latest_params = xgb_random.best_params_
         print("Finished optimising parameters, best set found:\n")
         pprint.pprint(self._latest_params)
 
@@ -150,7 +144,7 @@ class RFR(Model):
                 X_train_data_temp = X_train_data[list(_features)]
                 X_val_data_temp = X_val_data[list(_features)]
                 feature_dict[counter] = list(_features)
-                temp_model = RandomForestRegressor(**self._latest_params)
+                temp_model = xgboost.XGBRegressor(**self._latest_params)
                 temp_model.fit(X_train_data_temp, Y_train_data)
                 val_forecast = temp_model.predict(X_val_data_temp)
                 val_rmse = _test_metric(Y_val_data, val_forecast, test_function)[0]
@@ -163,7 +157,7 @@ class RFR(Model):
             self.best_features = feature_dict[index[0]]
             X_train_data_temp = X_train_data[feature_dict[index[0]]]
             X_val_data_temp = X_val_data[feature_dict[index[0]]]
-            temp_model = RandomForestRegressor(**self._latest_params)
+            temp_model = xgboost.XGBRegressor(**self._latest_params)
             temp_model.fit(X_train_data_temp, Y_train_data)
             val_forecast = temp_model.predict(X_val_data_temp)
             val_rmse = _test_metric(Y_val_data, val_forecast, test_function)[0]
@@ -184,12 +178,15 @@ class RFR(Model):
 
         Args:
             features : list - train model with list of desired features
-            params : dictionary - { n_estimators : n_estimators,
-                                    max_features : max_features,
-                                    max_depth : max_depth,
-                                    min_samples_split : min_samples_split,
-                                    min_samples_leaf : min_samples_leaf,
-                                    bootstrap : bootstrap }
+            params : dictionary e.g:  {'nthread': 4,
+                                      'objective': 'reg:linear',
+                                      'learning_rate': 0.02,
+                                      'max_depth': 10,
+                                      'min_child_weight': 4,
+                                      'silent': 1,
+                                      'subsample': 0.7,
+                                      'colsample_bytree': 0.7,
+                                      'n_estimators': 200}
 
         Returns:
 
@@ -197,10 +194,10 @@ class RFR(Model):
         """
         if not isinstance(self.get_data('X_train'), pd.DataFrame):
             raise TypeError("ERROR: The input training data was not in the form of a pd.DataFrame.")
-        print("Training - Random Forest Regression Classifier")
+        print("Training - XGBoost Regression Classifier")
         print("==============================================")
         print(" ")
-        print("Running random forest regression classifier on feauture set:")
+        print("Running XGBoost regression classifier on feauture set:")
         print(" ")
         if features == None:
             features = self.get_best_features()
@@ -219,14 +216,14 @@ class RFR(Model):
         if params == None:
             params = self._latest_params
 
-        rfr_model = RandomForestRegressor(**params)
-        rfr_model.fit(X_train_data_temp, Y_train_data)
-        self._model = rfr_model
-        Y_val_pred = rfr_model.predict(X_val_data_temp)
-        Y_test_pred = rfr_model.predict(X_test_data_temp)
-        print("Training r-squared:", rfr_model.score(X_train_data_temp, Y_train_data))
-        print("Validation r-squared:", rfr_model.score(X_val_data_temp, Y_val_data))
-        print("Testing r-squared:", rfr_model.score(X_test_data_temp, Y_test_data))
+        xgb_model = xgboost.XGBRegressor(**params)
+        xgb_model.fit(X_train_data_temp, Y_train_data)
+        self._model = xgb_model
+        Y_val_pred = xgb_model.predict(X_val_data_temp)
+        Y_test_pred = xgb_model.predict(X_test_data_temp)
+        print("Training r-squared:", xgb_model.score(X_train_data_temp, Y_train_data))
+        print("Validation r-squared:", xgb_model.score(X_val_data_temp, Y_val_data))
+        print("Testing r-squared:", xgb_model.score(X_test_data_temp, Y_test_data))
         final_rmse_val  = _test_metric(Y_val_data, Y_val_pred, 'rmse')
         self._val_rmse = final_rmse_val
         final_rmse_test = _test_metric(Y_test_data, Y_test_pred, 'rmse')
@@ -393,9 +390,9 @@ class RFR(Model):
 
     def help():
         helper_string = """
------------------------------Help: Random Forest Regression Classifier-----------------------------
+-----------------------------Help: XGBoost Regression Classifier-----------------------------
 
-This is a Random Forest regression classifier for single variable output data.
+This is a XGBoost regression classifier for single variable output data.
 
 To initialise a classifier, simply provide a feature set which matches the data you will use to train and test your model:
 
