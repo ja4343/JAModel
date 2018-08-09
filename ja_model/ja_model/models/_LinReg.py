@@ -16,7 +16,7 @@ class LinReg(Model):
     def __init__(self, features, *args, **kwargs):
         """
         Args:
-            features : list - list of desired features, these should match the headings of the training and testing data used later in the classification
+            features : list - list of desired features; these should match the headings of the training and testing data used later in the classification
 
         For more information, see LinReg.help()
         """
