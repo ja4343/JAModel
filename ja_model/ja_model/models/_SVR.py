@@ -317,7 +317,7 @@ class SVR(Model):
 
             if not inline:
                 if (save_name == None and save):
-                    save_string = 'LinReg_residuals' + str(self.save_count) + '.png'
+                    save_string = 'SVR_residuals' + str(self.save_count) + '.png'
                     self.save_count += 1
                 else:
                     save_string = save_name
@@ -350,7 +350,7 @@ class SVR(Model):
             residuals = self.get_data(data = 'Y_train') - self._model.predict(self.get_data(data = 'X_train')[self._current_features])
             if not inline:
                 if (save_name == None and save):
-                    save_string = 'LinReg_autocorrelation' + str(self.save_count) + '.png'
+                    save_string = 'SVR_autocorrelation' + str(self.save_count) + '.png'
                     self.save_count += 1
                 else:
                     save_string = save_name

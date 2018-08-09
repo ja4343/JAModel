@@ -6,6 +6,12 @@ import matplotlib.pyplot as plt
 from itertools import chain, combinations
 from sklearn.metrics import mean_squared_error
 
+def nn_out_to_list(nn_out):
+    Y_pred = []
+    for i in range(nn_out.shape[0]):
+        Y_pred.append(nn_out[i][0])
+    return Y_pred
+
 def random_date_range(start_date, max_date, length=365):
     """
     random_date_range(start_date, max_date, length=365)

@@ -13,6 +13,7 @@ class Model(object):
         self.__meta__ = "from ja_model library 2018"
         self.__data__ = {'X_train' : pd.DataFrame({}), 'Y_train' : pd.Series([]), 'X_val' : pd.DataFrame({}), 'Y_val' : pd.Series([]), 'X_test' : pd.DataFrame({}), 'Y_test' : pd.Series([]), 'Y_forecast': pd.Series({})}
         self.save_count = 0
+        self._test_error = None
 
 
     def set_data(self, data_dictionary=None):
