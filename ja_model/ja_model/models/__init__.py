@@ -8,3 +8,4 @@ from ._SVR import SVR
 from ._RFR import RFR
 from ._XGB import XGB
 from ._SLP import SLP
+from ._ARIMAX import ARIMAX
